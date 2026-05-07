@@ -1,6 +1,10 @@
 name: Build APK & IPA
 
 on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
   workflow_dispatch:
 
 jobs:
@@ -36,22 +40,20 @@ jobs:
         continue-on-error: true
 
       - name: Build APK (release)
-        run: flutter build apk --release --split-per-abi
-
-      - name: Build APK (universal)
         run: flutter build apk --release
 
-      - name: List APK outputs
-        run: find build/app/outputs -name "*.apk" | sort
+      - name: Find APK output
+        run: find build/ -name "*.apk" 2>/dev/null || echo "No APK found"
 
       - name: Upload APK artifacts
         uses: actions/upload-artifact@v4
         with:
           name: android-apk
-          path: build/app/outputs/flutter-apk/*.apk
+          path: build/app/outputs/flutter-apk/app-release.apk
           retention-days: 30
 
-  
+
+
   # ─────────────────────────────────────────────
   # Create GitHub Release on tag push
   # ─────────────────────────────────────────────
@@ -74,7 +76,6 @@ jobs:
         with:
           files: |
             artifacts/android/app-release.apk
-            artifacts/android/app-arm64-v8a-release.apk
             artifacts/ios/LanScanner-unsigned.ipa
           body: |
             ## LAN Scanner Release
@@ -82,6 +83,10 @@ jobs:
             ### Android
             - `app-release.apk` — 通用版（推荐）
             - `app-arm64-v8a-release.apk` — 64位 ARM（大多数现代手机）
+
+            ### iOS
+            - `LanScanner-unsigned.ipa` — 未签名，需自行签名后安装
+              （使用 AltStore / Sideloadly / 企业证书）
 
             ### 功能
             - 输入 CIDR 网段扫描局域网设备
