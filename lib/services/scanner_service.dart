@@ -96,15 +96,6 @@ class ScannerService {
       yield ScanProgress(total: total, scanned: scanned, newDevice: result);
     }
 
-    // After TCP scan, yield any mDNS-only devices not yet reported
-    final reportedIps = pending
-        .where((f) => f is Future)
-        .toSet();
-    for (final entry in mdnsResults.entries) {
-      if (!ips.contains(entry.key)) continue; // outside range
-      // Already reported by TCP scan? Skip (handled above)
-      // Just yield remaining mDNS-only hits
-    }
   }
 
   Future<DeviceInfo?> _probeHost(String ip, List<int> ports, int timeoutMs) async {
@@ -160,12 +151,10 @@ class ScannerService {
     try {
       final client = MDnsClient();
       await client.start();
-      await for (final ptr in client
+      await client
           .lookup<PtrResourceRecord>(ResourceRecordQuery.serverPointer('_services._dns-sd._udp.local'))
-          .timeout(const Duration(seconds: 8), onTimeout: (s) => s.close())) {
-        // Just collect what we can
-        _ = ptr;
-      }
+          .timeout(const Duration(seconds: 8), onTimeout: (s) => s.close())
+          .drain<void>();
       client.stop();
     } catch (_) {}
   }
