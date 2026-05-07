@@ -1,0 +1,24 @@
+name: lan_scanner
+description: LAN IP Scanner - Scan all devices on your local network
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  network_info_plus: ^6.0.0
+  multicast_dns: ^0.3.2+1
+  permission_handler: ^11.3.1
+  share_plus: ^10.0.0
+  cupertino_icons: ^1.0.6
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true
