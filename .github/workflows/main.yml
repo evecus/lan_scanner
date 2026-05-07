@@ -53,44 +53,6 @@ jobs:
           retention-days: 30
 
   # ─────────────────────────────────────────────
-  # iOS IPA build (requires macOS runner)
-  # ─────────────────────────────────────────────
-  build-ios:
-    name: Build iOS IPA
-    runs-on: macos-latest
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: '3.22.0'
-          channel: 'stable'
-          cache: true
-
-      - name: Get dependencies
-        run: flutter pub get
-
-      - name: Build iOS (no codesign)
-        run: flutter build ios --release --no-codesign
-
-      - name: Create IPA (unsigned)
-        run: |
-          mkdir -p build/ios/ipa/Payload
-          cp -r build/ios/iphoneos/Runner.app build/ios/ipa/Payload/
-          cd build/ios/ipa
-          zip -r LanScanner-unsigned.ipa Payload/
-
-      - name: Upload IPA artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ios-ipa-unsigned
-          path: build/ios/ipa/LanScanner-unsigned.ipa
-          retention-days: 30
-
-  # ─────────────────────────────────────────────
   # Create GitHub Release on tag push
   # ─────────────────────────────────────────────
   release:
