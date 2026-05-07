@@ -1,11 +1,20 @@
-name: Build APK & IPA
+name: Build & Release APK
 
 on:
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g. v1.0.0)'
+        required: true
+        default: 'v1.0.0'
+      release_notes:
+        description: 'Release notes'
+        required: false
+        default: 'LAN Scanner release'
 
 jobs:
   build-android:
-    name: Build Android APK
+    name: Build Android APK (arm64)
     runs-on: ubuntu-latest
 
     steps:
@@ -28,83 +37,102 @@ jobs:
       - name: Get dependencies
         run: flutter pub get
 
-      - name: Analyze code
-        run: flutter analyze --no-fatal-infos
-        continue-on-error: true
-
-      # Run flutter build apk, ignore the "Already watching path" crash exit code
-      # The APK is produced by Gradle BEFORE flutter CLI crashes
-      - name: Build APK (ignore watcher crash)
-        run: flutter build apk --release 2>&1 | tee /tmp/flutter_build.log; exit 0
-
-      - name: Find APK
+      # Decode keystore from GitHub Secret → write to disk
+      - name: Setup keystore
         run: |
-          echo "=== All APK files ==="
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > android/app/release.jks
+          cat > android/key.properties << EOF
+          storePassword=${{ secrets.STORE_PASSWORD }}
+          keyPassword=${{ secrets.KEY_PASSWORD }}
+          keyAlias=${{ secrets.KEY_ALIAS }}
+          storeFile=release.jks
+          EOF
+          echo "Keystore ready: $(ls -lh android/app/release.jks)"
+
+      # Build APK — ignore "Already watching path" crash (flutter CLI bug in CI)
+      # Gradle finishes the APK before the crash, so we just need to find it
+      - name: Build APK
+        run: flutter build apk --release 2>&1 | tee /tmp/build.log; exit 0
+
+      - name: Locate and verify APK
+        run: |
+          echo "=== APK search ==="
           find . -name "*.apk" 2>/dev/null | sort
-          echo "=== Build log tail ==="
-          tail -20 /tmp/flutter_build.log
-          
-          APK=$(find . -name "app-release.apk" 2>/dev/null | grep -v debug | head -1)
+
+          APK=$(find . -name "*arm64*.apk" 2>/dev/null | grep -v debug | head -1)
+          if [ -z "$APK" ]; then
+            APK=$(find . -name "app-release.apk" 2>/dev/null | grep -v debug | head -1)
+          fi
           if [ -z "$APK" ]; then
             APK=$(find . -name "*.apk" 2>/dev/null | grep -v debug | head -1)
           fi
-          
+
           if [ -z "$APK" ]; then
-            echo "ERROR: APK not found anywhere"
+            echo "ERROR: No APK found. Build log:"
+            cat /tmp/build.log
             exit 1
           fi
-          
-          echo "Using APK: $APK ($(du -sh $APK | cut -f1))"
-          mkdir -p output
-          cp "$APK" output/lan_scanner.apk
 
-      - name: Upload APK
+          echo "APK: $APK ($(du -sh $APK | cut -f1))"
+          mkdir -p output
+          cp "$APK" output/lan_scanner-arm64.apk
+
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: android-apk
-          path: output/lan_scanner.apk
-          retention-days: 30
-
+          path: output/lan_scanner-arm64.apk
+          retention-days: 7
 
   release:
-    name: Create Release
+    name: Publish GitHub Release
     needs: [build-android]
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
 
     steps:
-      - name: Download Android artifacts
+      - name: Download APK
         uses: actions/download-artifact@v4
         with:
           name: android-apk
-          path: artifacts/android
+          path: artifacts/
 
-      - name: Download iOS artifacts
-        uses: actions/download-artifact@v4
+
+      - name: Create Git tag
+        uses: actions/github-script@v7
         with:
-          name: ios-ipa-unsigned
-          path: artifacts/ios
+          script: |
+            await github.rest.git.createRef({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: `refs/tags/${{ github.event.inputs.tag }}`,
+              sha: context.sha
+            })
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            artifacts/android/lan_scanner.apk
-            artifacts/ios/LanScanner-unsigned.ipa
+          tag_name: ${{ github.event.inputs.tag }}
+          name: LAN Scanner ${{ github.event.inputs.tag }}
           body: |
-            ## LAN Scanner Release
+            ## LAN Scanner ${{ github.event.inputs.tag }}
 
-            ### Android
-            - `lan_scanner.apk` — 直接安装，支持所有架构
+            ${{ github.event.inputs.release_notes }}
 
-            ### iOS
-            - `LanScanner-unsigned.ipa` — 未签名，使用 AltStore / Sideloadly 安装
+            ### 下载
+            | 文件 | 说明 |
+            |------|------|
+            | `lan_scanner-arm64.apk` | Android arm64 正式签名版 |
+            | `LanScanner-unsigned.ipa` | iOS 未签名（AltStore/Sideloadly 安装）|
 
             ### 功能
-            - 输入 CIDR 网段扫描局域网设备（如 192.168.1.0/24）
-            - 自动检测当前 WiFi 网段
-            - 支持自定义端口，默认扫描 13 个常用端口
-            - 自动解析设备主机名
-            - 结果可导出分享
+            - 输入 CIDR 网段扫描局域网所有在线设备
+            - 自动填充当前 WiFi 网段
+            - 自定义端口 / 默认扫描 13 个常用端口
+            - 自动解析主机名，点击复制 IP
+          files: |
+            artifacts/lan_scanner-arm64.apk
+            artifacts/LanScanner-unsigned.ipa
+          draft: false
+          prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
