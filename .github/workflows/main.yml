@@ -41,61 +41,23 @@ jobs:
       - name: Build APK (universal)
         run: flutter build apk --release
 
+      - name: List APK outputs
+        run: find build/app/outputs -name "*.apk" | sort
+
       - name: Upload APK artifacts
         uses: actions/upload-artifact@v4
         with:
           name: android-apk
-          path: |
-            build/app/outputs/flutter-apk/app-release.apk
-            build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
-            build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk
-            build/app/outputs/flutter-apk/app-x86_64-release.apk
+          path: build/app/outputs/flutter-apk/*.apk
           retention-days: 30
 
-  # ─────────────────────────────────────────────
-  # iOS IPA build (requires macOS runner)
-  # ─────────────────────────────────────────────
-  build-ios:
-    name: Build iOS IPA
-    runs-on: macos-latest
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: '3.22.0'
-          channel: 'stable'
-          cache: true
-
-      - name: Get dependencies
-        run: flutter pub get
-
-      - name: Build iOS (no codesign)
-        run: flutter build ios --release --no-codesign
-
-      - name: Create IPA (unsigned)
-        run: |
-          mkdir -p build/ios/ipa/Payload
-          cp -r build/ios/iphoneos/Runner.app build/ios/ipa/Payload/
-          cd build/ios/ipa
-          zip -r LanScanner-unsigned.ipa Payload/
-
-      - name: Upload IPA artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ios-ipa-unsigned
-          path: build/ios/ipa/LanScanner-unsigned.ipa
-          retention-days: 30
-
+  
   # ─────────────────────────────────────────────
   # Create GitHub Release on tag push
   # ─────────────────────────────────────────────
   release:
     name: Create Release
-    needs: [build-android, build-ios]
+    needs: [build-android]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
 
@@ -106,11 +68,6 @@ jobs:
           name: android-apk
           path: artifacts/android
 
-      - name: Download iOS artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: ios-ipa-unsigned
-          path: artifacts/ios
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
@@ -125,10 +82,6 @@ jobs:
             ### Android
             - `app-release.apk` — 通用版（推荐）
             - `app-arm64-v8a-release.apk` — 64位 ARM（大多数现代手机）
-
-            ### iOS
-            - `LanScanner-unsigned.ipa` — 未签名，需自行签名后安装
-              （使用 AltStore / Sideloadly / 企业证书）
 
             ### 功能
             - 输入 CIDR 网段扫描局域网设备
