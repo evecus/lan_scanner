@@ -37,7 +37,22 @@ jobs:
       - name: Get dependencies
         run: flutter pub get
 
-      # Decode keystore from GitHub Secret → write to disk
+      # Let Flutter generate gradlew + gradle-wrapper.jar into android/
+      - name: Generate Android gradle wrapper
+        run: |
+          cd android
+          flutter pub get 2>/dev/null || true
+          # Flutter injects gradlew during build, but we can also get it via:
+          gradle wrapper --gradle-version=8.3 2>/dev/null || true
+          # If still missing, copy from Flutter SDK
+          if [ ! -f gradlew ]; then
+            FLUTTER_ROOT=$(flutter sdk-path)
+            cp "$FLUTTER_ROOT/packages/flutter_tools/gradle/gradlew" . 2>/dev/null || \
+            cp "$FLUTTER_ROOT/packages/flutter_tools/gradle/flutter.gradle" . 2>/dev/null || true
+          fi
+          ls -la
+        continue-on-error: true
+
       - name: Setup keystore
         run: |
           echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > android/app/release.jks
@@ -47,33 +62,35 @@ jobs:
           keyAlias=${{ secrets.KEY_ALIAS }}
           storeFile=release.jks
           EOF
-          echo "Keystore ready: $(ls -lh android/app/release.jks)"
 
-      # Build APK — ignore "Already watching path" crash (flutter CLI bug in CI)
-      # Gradle finishes the APK before the crash, so we just need to find it
+      # flutter build apk triggers Gradle internally and handles gradlew itself
+      # The "Already watching path" crash happens AFTER Gradle succeeds
+      # We capture exit code but don't fail on it
       - name: Build APK
-        run: flutter build apk --release 2>&1 | tee /tmp/build.log; exit 0
-
-      - name: Locate and verify APK
         run: |
-          echo "=== APK search ==="
+          flutter build apk --release \
+            --target-platform android-arm64 \
+            2>&1 | tee /tmp/build.log
+          echo "flutter exit: $?"
+        continue-on-error: true
+
+      - name: Locate APK
+        run: |
+          echo "=== All APK files ==="
           find . -name "*.apk" 2>/dev/null | sort
 
-          APK=$(find . -name "*arm64*.apk" 2>/dev/null | grep -v debug | head -1)
-          if [ -z "$APK" ]; then
-            APK=$(find . -name "app-release.apk" 2>/dev/null | grep -v debug | head -1)
-          fi
+          APK=$(find . -name "*.apk" 2>/dev/null | grep -i "release" | grep -v debug | head -1)
           if [ -z "$APK" ]; then
             APK=$(find . -name "*.apk" 2>/dev/null | grep -v debug | head -1)
           fi
 
           if [ -z "$APK" ]; then
-            echo "ERROR: No APK found. Build log:"
+            echo "=== Build log ==="
             cat /tmp/build.log
             exit 1
           fi
 
-          echo "APK: $APK ($(du -sh $APK | cut -f1))"
+          echo "Found: $APK ($(du -sh $APK | cut -f1))"
           mkdir -p output
           cp "$APK" output/lan_scanner-arm64.apk
 
@@ -118,17 +135,10 @@ jobs:
 
             ${{ github.event.inputs.release_notes }}
 
-            ### 下载
             | 文件 | 说明 |
             |------|------|
             | `lan_scanner-arm64.apk` | Android arm64 正式签名版 |
-            | `LanScanner-unsigned.ipa` | iOS 未签名（AltStore/Sideloadly 安装）|
-
-            ### 功能
-            - 输入 CIDR 网段扫描局域网所有在线设备
-            - 自动填充当前 WiFi 网段
-            - 自定义端口 / 默认扫描 13 个常用端口
-            - 自动解析主机名，点击复制 IP
+            | `LanScanner-unsigned.ipa` | iOS 未签名（AltStore/Sideloadly）|
           files: |
             artifacts/lan_scanner-arm64.apk
             artifacts/LanScanner-unsigned.ipa
